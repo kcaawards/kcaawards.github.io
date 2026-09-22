@@ -278,6 +278,8 @@ textarea.in{min-height:100px;resize:vertical}
 .adminbar{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
 .done-card{display:flex;gap:16px;align-items:center}
 .done-card img{width:84px;height:84px;object-fit:cover;border:1px solid var(--g1)}
+.done-card > div{min-width:0}
+.done-card h3{font-size:clamp(22px,6.5vw,32px);overflow-wrap:anywhere}
 .search{max-width:420px;margin:22px auto 8px;display:block}
 .adm{list-style:none;margin:0;padding:0}
 .adm li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--line);font-size:16px}
@@ -981,6 +983,7 @@ function openApplicant(a){
   const socials = a.socials || [];
   m.querySelector(".deco").innerHTML = (img ? `<img class="aphoto" src="${esc(img)}" alt="${esc(a.name)}">` : "")
     + `<p class="kicker">${esc(TYPE_LABEL[a.type] || "Applicant")}${a.verified ? " · Verified" : ""}</p><h3 class="h-lg goldtext">${esc(a.name)}</h3>`
+    + (a.submitted_by ? `<p class="note">Submitted by ${esc(a.submitted_by)}</p>` : "")
     + `<p class="note">Pronounced ${esc(a.say)}${a.say_link ? ` · <a href="${esc(a.say_link)}" target="_blank" rel="noopener">Hear it</a>` : ""}</p>`
     + (a.type === "ent" && a.groups ? `<p class="note">Groups: ${esc(a.groups.split("\n").filter(Boolean).join(", "))}</p>` : "")
     + `<div class="btnrow">${a.intro ? `<a class="btn btn-gold" href="${esc(a.intro)}" target="_blank" rel="noopener">Watch intro</a>` : ""}${tt ? `<a class="btn" href="https://www.tiktok.com/@${esc(tt)}" target="_blank" rel="noopener">TikTok</a>` : ""}${socials.map(s => `<a class="btn" href="${esc(isUrl(s.v) ? s.v : "#")}" target="_blank" rel="noopener">${esc(s.t)}</a>`).join("")}</div>`
@@ -1007,26 +1010,42 @@ const content = $("app-content");
 const blank = () => ({ done:false, name:"", say:"", sayLink:"", discord:"", type:"solo", group:"", members:"", memberList:[], owners:"", groups:"", tiktok:"", profile:"", socials:[], socType:"YouTube", intro:"", cats:[], links:{}, code:false, req:false, own:false, rules:false, photo_path:"", existing:false });
 let E = blank(), loadedFor = null, pendingPhoto = null, pendingPreview = "", saving = false;
 let pendingM = {}, removeLater = [];
+let MINE = { own:null, groups:[] }, forGroup = null; // forGroup: null = your own application, { id } = a group you submit
 const newMember = () => ({ id: Math.random().toString(36).slice(2, 9), name:"", tiktok:"", idol:"", photo_path:"", fc_path:"" });
 const SOCIAL_TYPES = ["YouTube","Instagram","BandLab","X","Spotify","SoundCloud"];
-const draftKey = () => "kca-draft-" + (uid() || "anon");
+const draftKey = () => "kca-draft-" + (uid() || "anon") + (forGroup ? "-group" : "");
 const save = () => { try { localStorage.setItem(draftKey(), JSON.stringify(E)); } catch(e) {} };
 function pickable(){
   const ent = E.type === "ent", out = {};
   for (const [g, items] of Object.entries(ALLPICK)) { const k = items.filter(([n]) => ent ? ENT_ONLY.has(n) : !ENT_ONLY.has(n)); if (k.length) out[g] = k; }
   return out;
 }
+function rowToE(data){
+  const e = blank();
+  Object.assign(e, { id:data.id, existing:true, done:true, type:data.type, name:data.name, say:data.say, sayLink:data.say_link || "", discord:data.discord, tiktok:data.tiktok, profile:data.profile,
+    group:data.group_name || "", members:data.members || "", memberList:(data.members_list && data.members_list.length ? data.members_list : (data.members || "").split("\n").map(x => x.trim()).filter(Boolean).map(x => ({ ...newMember(), name:x.replace(/^@/, ""), tiktok:x.startsWith("@") ? x : "" }))), owners:data.owners || "", groups:data.groups || "", intro:data.intro || "", socials:data.socials || [],
+    cats:data.categories || [], links:data.links || {}, photo_path:data.photo_path || "", code:true, req:true, own:true, rules:true, verified:data.verified });
+  return e;
+}
 async function loadMine(){
   if (loadedFor === uid()) return;
-  loadedFor = uid(); E = blank(); pendingPhoto = null; pendingPreview = ""; pendingM = {}; removeLater = [];
-  const { data } = await sb.from("applicants").select("*").eq("user_id", uid()).maybeSingle();
-  if (data) {
-    Object.assign(E, { existing:true, done:true, type:data.type, name:data.name, say:data.say, sayLink:data.say_link || "", discord:data.discord, tiktok:data.tiktok, profile:data.profile,
-      group:data.group_name || "", members:data.members || "", memberList:(data.members_list && data.members_list.length ? data.members_list : (data.members || "").split("\n").map(x => x.trim()).filter(Boolean).map(x => ({ ...newMember(), name:x.replace(/^@/, ""), tiktok:x.startsWith("@") ? x : "" }))), owners:data.owners || "", groups:data.groups || "", intro:data.intro || "", socials:data.socials || [],
-      cats:data.categories || [], links:data.links || {}, photo_path:data.photo_path || "", code:true, req:true, own:true, rules:true, verified:data.verified });
-  } else {
-    try { const d = JSON.parse(localStorage.getItem(draftKey()) || "null"); if (d) Object.assign(E, d, { done:false, existing:false }); } catch(e) {}
+  loadedFor = uid(); E = blank(); forGroup = null; pendingPhoto = null; pendingPreview = ""; pendingM = {}; removeLater = [];
+  const { data } = await sb.from("applicants").select("*").eq("user_id", uid()).order("created_at");
+  const rows = data || [];
+  MINE = { own: rows.find(r => !r.on_behalf) || null, groups: rows.filter(r => r.on_behalf) };
+  if (MINE.own) E = rowToE(MINE.own);
+  else { try { const d = JSON.parse(localStorage.getItem(draftKey()) || "null"); if (d) Object.assign(E, d, { done:false, existing:false, id:null }); } catch(e) {} }
+}
+function startGroup(row){
+  forGroup = { id: row ? row.id : null };
+  pendingPhoto = null; pendingPreview = ""; pendingM = {}; removeLater = [];
+  if (row) { E = rowToE(row); E.done = false; }
+  else {
+    E = blank(); E.type = "group";
+    try { const d = JSON.parse(localStorage.getItem(draftKey()) || "null"); if (d) Object.assign(E, d, { done:false, existing:false, id:null, type:"group" }); } catch(e) {}
+    const o = MINE.own; if (o && !E.tiktok) { E.tiktok = o.tiktok; E.profile = o.profile; E.discord = o.discord; }
   }
+  renderApply(); window.scrollTo(0,0);
 }
 function missingDetails(){
   const m = [];
@@ -1054,17 +1073,18 @@ async function renderApply(){
   }
   await loadMine();
   if (!seasonOpen()) {
-    if (E.existing) { E.done = true; renderDone(); return; }
+    forGroup = null;
+    if (MINE.own) { E = rowToE(MINE.own); renderDone(); return; }
     content.innerHTML = applyHead() + closedPanel("Applications");
     return;
   }
-  if (E.done) { renderDone(); return; }
+  if (!forGroup && E.done) { renderDone(); return; }
   const miss = missingDetails(), ent = E.type === "ent";
   const pic = pendingPreview || photoUrl(E.photo_path);
   let h = applyHead() + `
     <div class="notice"><p class="kicker">Applying for upcoming covers</p><p>You can apply with a cover you plan to post later, as long as it goes up within the eligibility window, <span class="hl">${esc(ELIGIBILITY || "on dates announced soon")}</span>. You can edit your application until applications close.</p></div>`;
   h += `<div class="deco"><h3 class="h-lg goldtext">Creator details</h3><p class="sub">This is how you'll appear on the 2026 Applicants page and at the show.</p>
-    <div class="field"><span class="lbl">Applying as</span><div class="seg three" id="f-type"><button type="button" data-v="solo" aria-pressed="${E.type==="solo"}">Solo singer</button><button type="button" data-v="group" aria-pressed="${E.type==="group"}">Group</button><button type="button" data-v="ent" aria-pressed="${ent}">Entertainment</button></div></div>
+    ${forGroup ? `<div class="notice"><p class="kicker">Group submitted by ${esc(MINE.own ? MINE.own.name : "your entertainment")}</p><p>You're applying for one of your groups. Use the group's own TikTok, or your entertainment's TikTok if the group doesn't have one. Entertainments can submit up to 2 groups.</p></div>` : `<div class="field"><span class="lbl">Applying as</span><div class="seg three" id="f-type"><button type="button" data-v="solo" aria-pressed="${E.type==="solo"}">Solo singer</button><button type="button" data-v="group" aria-pressed="${E.type==="group"}">Group</button><button type="button" data-v="ent" aria-pressed="${ent}">Entertainment</button></div></div>`}
     ${field("f-name","name", ent ? "Entertainment name" : "Show display name", "Use a clear, readable name exactly as it should be displayed. Letters and numbers only, no emojis.",'placeholder="Your public name" autocomplete="off" maxlength="40"')}
     ${field("f-say","say","Name pronunciation","Spell it how it sounds, like SEE-yoon. The host reads it at the show.",'placeholder="How to say it" autocomplete="off" maxlength="80"')}
     ${field("f-saylink","sayLink","Pronunciation video","Optional. A TikTok or link where you say the name out loud.",'type="url" inputmode="url" placeholder="https://" autocapitalize="off"')}
@@ -1105,7 +1125,7 @@ async function renderApply(){
     <label class="check"><input type="checkbox" data-c="own" ${E.own?"checked":""}><span>My ${ent ? "videos" : "covers"} meet the nomination criteria.</span></label>
     <label class="check"><input type="checkbox" data-c="rules" ${E.rules?"checked":""}><span>I read the rules. Alt accounts, vote trading, or inappropriate photos can get me removed.</span></label>
     <p class="err" id="checks-err"></p>
-    <button class="btn btn-gold submit" type="button" id="submit">${E.existing ? "Save changes" : "Submit application"}</button><p class="err" id="submit-err"></p></div>`;
+    <button class="btn btn-gold submit" type="button" id="submit">${E.existing ? "Save changes" : forGroup ? "Submit group" : "Submit application"}</button>${forGroup ? `<button class="btn" type="button" id="cancel-group" style="width:100%;margin-top:10px">Cancel</button>` : ""}<p class="err" id="submit-err"></p></div>`;
   content.innerHTML = h;
   wireApply();
 }
@@ -1174,6 +1194,7 @@ function wireApply(){
   content.querySelectorAll("[data-c]").forEach(el => el.addEventListener("change", () => { E[el.dataset.c] = el.checked; save(); }));
   wireMembers();
   $("submit").addEventListener("click", submitApp);
+  if ($("cancel-group")) $("cancel-group").addEventListener("click", () => { forGroup = null; E = MINE.own ? rowToE(MINE.own) : blank(); renderApply(); window.scrollTo(0,0); });
 }
 function refreshLock(){ const locked = !!content.querySelector(".deco.locked"); if (locked !== (missingDetails().length > 0)) keep(renderApply); }
 function shrink(file, maxSide){
@@ -1237,30 +1258,50 @@ async function submitApp(){
       tiktok: E.tiktok.trim(), profile: E.profile.trim(), group_name: E.type === "group" ? E.group.trim() : null, members: E.type === "group" ? E.members.trim() : null, members_list: E.type === "group" ? E.memberList.map(({ id, name, tiktok, idol, photo_path, fc_path }) => ({ id, name: name.trim(), tiktok: tiktok.trim(), idol: (idol || "").trim(), photo_path: photo_path || "", fc_path: fc_path || "" })) : [],
       owners: E.type === "ent" ? E.owners.trim() : null, groups: E.type === "ent" ? E.groups.trim() || null : null, intro: E.intro.trim() || null,
       socials: E.socials, categories: E.cats, links, photo_path: path };
-    const { error } = await sb.from("applicants").upsert(row, { onConflict: "user_id" });
-    if (error) throw error;
-    E.photo_path = path; E.existing = true; E.done = true; pendingPhoto = null; pendingPreview = "";
+    row.on_behalf = !!forGroup;
+    row.parent_id = forGroup ? (MINE.own && MINE.own.id) : null;
+    const res = E.id ? await sb.from("applicants").update(row).eq("id", E.id) : await sb.from("applicants").insert(row);
+    if (res.error) throw res.error;
     try { localStorage.removeItem(draftKey()); } catch(e) {}
-    APPS = null; renderDone(); window.scrollTo(0,0);
+    pendingPhoto = null; pendingPreview = "";
+    loadedFor = null; APPS = null; await loadMine(); renderDone(); window.scrollTo(0,0);
   } catch(e) {
     $("submit-err").textContent = "Couldn't save your application: " + (e.message || "try again.");
   } finally { saving = false; const b = $("submit"); if (b) { b.textContent = E.existing ? "Save changes" : "Submit application"; b.removeAttribute("aria-disabled"); } }
 }
 function renderDone(){
-  const pic = photoUrl(E.photo_path);
-  content.innerHTML = `<p class="kicker">The KCA Awards ${SEASON.year}</p><h2 class="h-xl goldtext">You're in</h2>
-    <div class="deco" style="margin-top:24px"><div class="done-card">${pic ? `<img src="${esc(pic)}" alt="">` : ""}<div><h3 class="h-lg goldtext" style="margin:0">${esc(E.name)}</h3><p class="note" style="margin:4px 0 0">${esc(TYPE_LABEL[E.type])} · ${E.cats.length} categor${E.cats.length === 1 ? "y" : "ies"}</p></div></div>
-    <p style="margin:18px 0 0">Your application is live on the ${SEASON.year} Applicants page. Keep <b class="hl">${esc(VERIFY_CODE)}</b> in your TikTok bio until a mod adds the verified check to your card.</p>
-    <div class="btnrow" style="margin-top:20px"><a class="btn btn-gold" href="#applicants">See ${SEASON.year} Applicants</a>${seasonOpen() ? `<button class="btn" type="button" id="edit">Edit application</button>` : ""}${LINKS.discord ? `<a class="btn" href="${esc(LINKS.discord)}" target="_blank" rel="noopener">Join the Discord</a>` : ""}</div>
-    <hr class="rule"><button class="rm" type="button" id="withdraw">Withdraw my application</button></div>`;
-  if ($("edit")) $("edit").addEventListener("click", () => { E.done = false; renderApply(); window.scrollTo(0,0); });
-  $("withdraw").addEventListener("click", async () => {
-    if (!confirm("Withdraw your application? It will be removed from the applicants page.")) return;
-    const { error } = await sb.from("applicants").delete().eq("user_id", uid());
+  const own = MINE.own; if (!own) { E = blank(); renderApply(); return; }
+  const open = seasonOpen(), isEnt = own.type === "ent";
+  const card = (r, kind) => { const pic = photoUrl(r.photo_path), n = (r.categories || []).length;
+    return `<div class="deco" style="margin-top:18px"><div class="done-card">${pic ? `<img src="${esc(pic)}" alt="">` : ""}<div><h3 class="h-lg goldtext" style="margin:0">${esc(r.name)}${r.verified ? ` <span class="vbadge" title="Verified">✓</span>` : ""}</h3><p class="note" style="margin:4px 0 0">${esc(TYPE_LABEL[r.type])} · ${n} categor${n === 1 ? "y" : "ies"}${kind === "group" ? " · submitted by " + esc(own.name) : ""}</p></div></div>
+      <div class="btnrow" style="margin-top:16px">${open ? `<button class="btn" type="button" data-edit="${r.id}">Edit</button>` : ""}<button class="rm" type="button" data-withdraw="${r.id}">Withdraw</button></div></div>`; };
+  let h = `<p class="kicker">The KCA Awards ${SEASON.year}</p><h2 class="h-xl goldtext">You're in</h2>
+    <p style="margin:14px 0 0">Your application is live on the ${SEASON.year} Applicants page. Keep <b class="hl">${esc(VERIFY_CODE)}</b> in your TikTok bio until a mod adds the verified check.</p>` + card(own, "own");
+  if (isEnt) {
+    h += `<div class="deco" style="margin-top:18px"><h3 class="h-lg goldtext">Your groups (${MINE.groups.length}/2)</h3><p class="sub">As an entertainment, you can also submit up to 2 of your groups. Each one appears as its own applicant.</p>`
+      + MINE.groups.map(g => card(g, "group")).join("")
+      + (open && MINE.groups.length < 2 ? `<button class="btn btn-gold" type="button" id="add-group" style="margin-top:16px">+ Submit a group</button>` : "")
+      + `</div>`;
+  }
+  h += `<div class="btnrow" style="margin-top:20px"><a class="btn btn-gold" href="#applicants">See ${SEASON.year} Applicants</a>${LINKS.discord ? `<a class="btn" href="${esc(LINKS.discord)}" target="_blank" rel="noopener">Join the Discord</a>` : ""}</div>`;
+  content.innerHTML = h;
+  const byId = id => [own, ...MINE.groups].find(r => r.id === id);
+  content.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => {
+    const r = byId(b.dataset.edit);
+    if (r.on_behalf) startGroup(r); else { forGroup = null; E = rowToE(own); E.done = false; renderApply(); window.scrollTo(0,0); }
+  }));
+  if ($("add-group")) $("add-group").addEventListener("click", () => startGroup(null));
+  content.querySelectorAll("[data-withdraw]").forEach(b => b.addEventListener("click", async () => {
+    const r = byId(b.dataset.withdraw);
+    const extra = !r.on_behalf && MINE.groups.length ? ` This also removes the ${MINE.groups.length} group${MINE.groups.length === 1 ? "" : "s"} you submitted.` : "";
+    if (!confirm(`Withdraw ${r.name}? It will be removed from the applicants page.${extra}`)) return;
+    const gone = r.on_behalf ? [r] : [r, ...MINE.groups];
+    const { error } = await sb.from("applicants").delete().eq("id", r.id);
     if (error) { alert("Couldn't withdraw: " + error.message); return; }
-    if (E.photo_path) await sb.storage.from("photos").remove([E.photo_path]);
-    loadedFor = null; APPS = null; renderApply();
-  });
+    const paths = gone.flatMap(x => [x.photo_path, ...(x.members_list || []).flatMap(m => [m.photo_path, m.fc_path])]).filter(Boolean);
+    if (paths.length) await sb.storage.from("photos").remove(paths);
+    loadedFor = null; APPS = null; await loadMine(); renderApply();
+  }));
 }
 
 // ---------- nominations ----------
