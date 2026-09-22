@@ -1108,13 +1108,13 @@ async function renderApply(){
       <p class="err" id="soc-val-err"></p>
       <ul class="socials">${E.socials.map((x,i) => `<li><b>${esc(x.t)}</b><span>${esc(x.v)}</span><button class="rm" type="button" data-rm="${i}">Remove</button></li>`).join("")}</ul></div>
   </div>`;
-  h += `<div class="deco${miss.length ? " locked" : ""}"><h3 class="h-lg goldtext">Available categories</h3><p class="sub">Pick all categories you want to be considered for, then add ${ent ? "a TikTok that shows why you deserve it" : "the cover"} for each one.</p>`;
+  h += `<div class="deco${miss.length ? " locked" : ""}"><h3 class="h-lg goldtext">Available categories</h3><p class="sub">Pick all categories you want to be considered for. Adding a TikTok link for each one is optional, but it helps voters see ${ent ? "why you deserve it" : "your cover"}.</p>`;
   h += miss.length ? `<div class="missing">Please first fill out the missing creator details:<ul>${miss.map(m => `<li>${esc(m)}</li>`).join("")}</ul></div>` : `<p class="count">${E.cats.length ? E.cats.length + " selected" : "None selected yet"}</p>`;
   for (const [g, items] of Object.entries(pickable())) {
     h += `<div class="pick"><p class="kicker">${esc(g)}</p>`;
     items.forEach(([n]) => { const on = E.cats.includes(n), id = "c-" + ORDER.indexOf(n);
       h += `<div class="row${on ? " on" : ""}"><label><input type="checkbox" data-cat="${esc(n)}" ${on ? "checked" : ""} ${miss.length ? "disabled" : ""}>${esc(n)}</label>`
-        + (on ? `<div class="linkin"><input class="in" id="${id}" data-link="${esc(n)}" type="url" inputmode="url" autocapitalize="off" placeholder="${ent ? "TikTok link that shows this" : "TikTok link to your cover"}" value="${esc(E.links[n] || "")}" aria-label="TikTok link for ${esc(n)}"><p class="err" id="${id}-err"></p></div>` : "") + `</div>`; });
+        + (on ? `<div class="linkin"><input class="in" id="${id}" data-link="${esc(n)}" type="url" inputmode="url" autocapitalize="off" placeholder="${ent ? "TikTok link that shows this" : "TikTok link to your cover"} (optional)" value="${esc(E.links[n] || "")}" aria-label="TikTok link for ${esc(n)}"><p class="err" id="${id}-err"></p></div>` : "") + `</div>`; });
     h += `</div>`;
   }
   h += `<p class="err" id="cats-err"></p><p class="note">Judges' awards aren't open for applications.</p></div>`;
@@ -1227,7 +1227,7 @@ async function submitApp(){
     else if (E.memberList.some(m => !m.name.trim())) { $("f-members-err").textContent = "Every member needs a name."; ok = false; } }
   if (E.type === "ent" && !E.owners.trim()) ok = bad("f-owners", "List the owners and staff.");
   if (!E.cats.length) { $("cats-err").textContent = "Pick at least one category."; ok = false; }
-  E.cats.forEach(c => { if (!isTikTok(E.links[c])) ok = bad("c-" + ORDER.indexOf(c), "Paste a TikTok video link."); });
+  E.cats.forEach(c => { const l = (E.links[c] || "").trim(); if (l && !isUrl(l)) ok = bad("c-" + ORDER.indexOf(c), "Paste a full link that starts with https://, or leave it empty."); });
   if (!(E.code && E.req && E.own && E.rules)) { $("checks-err").textContent = "Check all four boxes to submit."; ok = false; }
   if (!ok) { const f = content.querySelector(".bad, .err:not(:empty)"); if (f) f.scrollIntoView({block:"center"}); return; }
   const btn = $("submit"); saving = true; btn.textContent = "Saving…"; btn.setAttribute("aria-disabled","true");
@@ -1253,7 +1253,7 @@ async function submitApp(){
       E.memberList.forEach(m => { if (m.photo_path) removeLater.push(m.photo_path); if (m.fc_path) removeLater.push(m.fc_path); });
     }
     if (removeLater.length) { await sb.storage.from("photos").remove(removeLater); removeLater = []; }
-    const links = Object.fromEntries(E.cats.map(c => [c, E.links[c]]));
+    const links = Object.fromEntries(E.cats.map(c => [c, (E.links[c] || "").trim()]).filter(([, l]) => l));
     const row = { user_id: uid(), type: E.type, name: E.name.trim(), say: E.say.trim(), say_link: E.sayLink.trim() || null, discord: E.discord.trim(),
       tiktok: E.tiktok.trim(), profile: E.profile.trim(), group_name: E.type === "group" ? E.group.trim() : null, members: E.type === "group" ? E.members.trim() : null, members_list: E.type === "group" ? E.memberList.map(({ id, name, tiktok, idol, photo_path, fc_path }) => ({ id, name: name.trim(), tiktok: tiktok.trim(), idol: (idol || "").trim(), photo_path: photo_path || "", fc_path: fc_path || "" })) : [],
       owners: E.type === "ent" ? E.owners.trim() : null, groups: E.type === "ent" ? E.groups.trim() || null : null, intro: E.intro.trim() || null,
